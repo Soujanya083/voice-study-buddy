@@ -14,11 +14,15 @@ shows where to focus.
 | `generate_flashcards` | Notes -> flashcards via Gemini API |
 | `add_flashcard` | Add a card by hand |
 | `get_question` | Next due question (weak cards first) |
-| `check_answer` | Grades answer, reschedules card |
+| `check_answer` | Grades answer (Gemini judges meaning; keyword fallback), reschedules card |
+| `get_hint` | Hint without revealing the answer |
+| `explain_answer` | Short spoken explanation |
 | `weak_topics` | Accuracy per topic, weakest first |
 | `study_summary` | Total, due, mastered, accuracy |
 
 Every response has a `speech` field written to be read aloud.
+
+An Agent Skill for driving these tools is in `skills/study-buddy/SKILL.md`.
 
 ## Run
 ```

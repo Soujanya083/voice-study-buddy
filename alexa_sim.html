@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Study Buddy - Simulated Alexa+</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🎓</text></svg>">
 <style>
 :root{--bg:#0b1220;--card:#121c31;--line:#22314f;--text:#e8eefc;--mute:#8fa3c7;--accent:#2dd4ff;--me:#1d4ed8;--ok:#34d399;--bad:#f87171}
 @media (prefers-color-scheme: light){:root{--bg:#f3f6fc;--card:#fff;--line:#d9e2f2;--text:#0f1b33;--mute:#51648a;--accent:#0891b2;--me:#2563eb}}
@@ -46,6 +47,8 @@ button.alt{background:transparent;color:var(--text);border:1px solid var(--line)
     <button class="alt" data-s="quiz me">Quiz me</button>
     <button class="alt" data-s="how am I doing">How am I doing?</button>
     <button class="alt" data-s="weak topics">Weak topics</button>
+    <button class="alt" data-s="hint">Hint</button>
+    <button class="alt" data-s="explain">Explain</button>
     <button class="alt" data-s="help">Help</button>
     <button class="alt" id="muteBtn">🔊 Voice on</button>
   </div>
@@ -63,7 +66,7 @@ button.alt{background:transparent;color:var(--text);border:1px solid var(--line)
 </main>
 <script>
 const $=id=>document.getElementById(id);
-let rid=1, awaiting=null, voiceOn=true, topic="";
+let rid=1, awaiting=null, lastCard=null, voiceOn=true, topic="";
 
 async function rpc(method, params){
   const r=await fetch('/mcp',{method:'POST',headers:{'Content-Type':'application/json','Accept':'application/json, text/event-stream'},body:JSON.stringify({jsonrpc:'2.0',id:rid++,method,params})});
@@ -96,13 +99,17 @@ async function handle(text){
   const t=text.trim(); if(!t) return; say(t,'u'); const low=t.toLowerCase();
   try{
     if(/^(stop|quit|exit|cancel|that's all|enough)/.test(low)){awaiting=null;say('Okay, stopping the quiz. Great work!');return}
+    if(/^hint/.test(low)){
+      if(awaiting){say((await tool('get_hint',{card_id:awaiting})).speech)}else{say('Ask me a question first, then say hint.')}return}
+    if(/^explain/.test(low)){
+      if(lastCard){say((await tool('explain_answer',{card_id:lastCard})).speech)}else{say('Answer a question first, then say explain.')}return}
     if(awaiting){
       if(/^(skip|next)$/.test(low)){say(await ask());return}
-      const r=await tool('check_answer',{card_id:awaiting,user_answer:t}); awaiting=null;
+      const r=await tool('check_answer',{card_id:awaiting,user_answer:t}); lastCard=awaiting; awaiting=null;
       const nxt=await ask(); say(r.speech+'. Next question. '+nxt); await refresh(); return}
     if(/(how am i|progress|summary|doing)/.test(low)){const s=await tool('study_summary');const w=await tool('weak_topics');say(s.speech+' '+w.speech);return}
     if(/weak/.test(low)){say((await tool('weak_topics')).speech);return}
-    if(/help|what can you do/.test(low)){say('You can say: quiz me, quiz me on DBMS, how am I doing, or weak topics. During a quiz say skip or stop.');return}
+    if(/help|what can you do/.test(low)){say('You can say: quiz me, quiz me on DBMS, how am I doing, or weak topics. During a quiz say hint, skip, or stop. After an answer, say explain.');return}
     const m=low.match(/(quiz|test|ask)\s+me(?:\s+(?:on|about)\s+(.+))?/);
     if(m||/^(start|begin|next)/.test(low)){topic=(m&&m[2])?m[2].trim():"";say(await ask());return}
     say("Sorry, I didn't catch that. Try: quiz me, or how am I doing.");

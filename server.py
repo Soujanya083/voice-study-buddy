@@ -4,7 +4,9 @@ Tools:
   generate_flashcards - turn pasted notes into flashcards (Gemini API)
   add_flashcard       - add one flashcard by hand
   get_question        - next question (spaced repetition: due cards first)
-  check_answer        - grade the answer, move the card between Leitner boxes
+  check_answer        - grade the answer (Gemini if available, else keywords), reschedule
+  get_hint            - a hint that never gives the full answer away
+  explain_answer      - short spoken explanation of a card's answer
   weak_topics         - analytics: accuracy per topic, weakest first
   study_summary       - progress snapshot with a spoken summary
 
@@ -113,24 +115,86 @@ def get_question(topic: str = "") -> dict:
             "speech": f"{card['topic']}. {card['question']}"}
 
 
+def _grade_with_gemini(question: str, expected: str, given: str):
+    """Ask Gemini to judge meaning. Returns (is_correct, short_feedback)."""
+    prompt = (
+        "You are a friendly tutor grading a spoken answer. Judge the MEANING, not exact "
+        "wording. Ignore speech-to-text mistakes.\n"
+        f"Question: {question}\nCorrect answer: {expected}\nStudent answer: {given}\n"
+        'Reply with ONLY JSON: {"correct": true or false, "feedback": "max 12 words"}'
+    )
+    raw = _gemini_text(prompt)
+    obj = json.loads(raw[raw.index("{"): raw.rindex("}") + 1])
+    return bool(obj["correct"]), str(obj.get("feedback", "")).strip()
+
+
+def _grade_with_keywords(expected: str, given: str) -> bool:
+    keywords = {w.strip(".,!?").lower() for w in expected.split() if len(w) > 3}
+    hits = sum(1 for w in keywords if w in given.lower())
+    return bool(keywords) and hits / len(keywords) >= 0.5
+
+
 @mcp.tool()
 def check_answer(card_id: int, user_answer: str) -> dict:
-    """Grade the spoken answer (keyword match), then reschedule the card."""
+    """Grade the spoken answer, then reschedule the card.
+
+    Uses Gemini to judge meaning when GEMINI_API_KEY is set; otherwise (or if
+    the call fails) falls back to simple keyword matching.
+    """
     data = load()
     for card in data["cards"]:
         if card["id"] != card_id:
             continue
-        keywords = {w.strip(".,!?").lower() for w in card["answer"].split() if len(w) > 3}
-        spoken = user_answer.lower()
-        hits = sum(1 for w in keywords if w in spoken)
-        ok = bool(keywords) and hits / len(keywords) >= 0.5
+        feedback, graded_by = "", "keywords"
+        try:
+            if not os.getenv("GEMINI_API_KEY"):
+                raise RuntimeError("no key")
+            ok, feedback = _grade_with_gemini(card["question"], card["answer"], user_answer)
+            graded_by = "gemini"
+        except Exception:
+            ok = _grade_with_keywords(card["answer"], user_answer)
         card["correct" if ok else "wrong"] += 1
         card["box"] = min(card["box"] + 1, 5) if ok else 1
         card["due"] = (now() + INTERVALS[card["box"]]).isoformat()
         save(data)
-        speech = ("Correct! " if ok else "Not quite. ") + f"The answer is: {card['answer']}"
-        return {"correct": ok, "expected_answer": card["answer"],
-                "new_box": card["box"], "speech": speech}
+        speech = ("Correct! " if ok else "Not quite. ")
+        speech += (feedback + " " if feedback else "") + f"The answer is: {card['answer']}"
+        return {"correct": ok, "expected_answer": card["answer"], "new_box": card["box"],
+                "graded_by": graded_by, "speech": speech}
+    return {"error": f"Card {card_id} not found.", "speech": "I could not find that card."}
+
+
+@mcp.tool()
+def get_hint(card_id: int) -> dict:
+    """Give a hint for a card without revealing the whole answer."""
+    for card in load()["cards"]:
+        if card["id"] == card_id:
+            words = card["answer"].split()
+            if len(words) > 1:
+                hint = " ".join([words[0]] + ["_" * len(w) for w in words[1:]])
+                speech = f"Hint: it starts with {words[0]}, and has {len(words)} words."
+            else:
+                hint = words[0][0] + "_" * (len(words[0]) - 1)
+                speech = f"Hint: it starts with the letter {words[0][0]} and has {len(words[0])} letters."
+            return {"hint": hint, "speech": speech}
+    return {"error": f"Card {card_id} not found.", "speech": "I could not find that card."}
+
+
+@mcp.tool()
+def explain_answer(card_id: int) -> dict:
+    """Explain a card's answer in two short sentences (Gemini if available)."""
+    for card in load()["cards"]:
+        if card["id"] == card_id:
+            prompt = (f"Question: {card['question']}\nCorrect answer: {card['answer']}\n"
+                      "Explain this to a student in two short sentences, simple words, "
+                      "easy to say aloud. No markdown.")
+            try:
+                if not os.getenv("GEMINI_API_KEY"):
+                    raise RuntimeError("no key")
+                text = _gemini_text(prompt).strip()
+            except Exception:
+                text = f"The correct answer is: {card['answer']}"
+            return {"explanation": text, "speech": f"About {card['question']} {text}"}
     return {"error": f"Card {card_id} not found.", "speech": "I could not find that card."}
 
 
