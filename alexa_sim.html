@@ -99,6 +99,11 @@ async function handle(text){
   const t=text.trim(); if(!t) return; say(t,'u'); const low=t.toLowerCase();
   try{
     if(/^(stop|quit|exit|cancel|that's all|enough)/.test(low)){awaiting=null;say('Okay, stopping the quiz. Great work!');return}
+    // Commands that always work, even while a question is waiting for an answer.
+    if(/^(how am i|my progress|progress|summary|study summary)/.test(low)){const s=await tool('study_summary');const w=await tool('weak_topics');say(s.speech+' '+w.speech);return}
+    if(/^(weak topics|weak)/.test(low)){say((await tool('weak_topics')).speech);return}
+    if(/^(help|what can you do)/.test(low)){say('You can say: quiz me, quiz me on DBMS, how am I doing, or weak topics. During a quiz say hint, skip, or stop. After an answer, say explain.');return}
+    if(/^(quiz|test|ask)\s+me/.test(low)){const m=low.match(/(?:on|about)\s+(.+)/);topic=m?m[1].trim():"";say(await ask());return}
     if(/^hint/.test(low)){
       if(awaiting){say((await tool('get_hint',{card_id:awaiting})).speech)}else{say('Ask me a question first, then say hint.')}return}
     if(/^explain/.test(low)){
@@ -107,9 +112,6 @@ async function handle(text){
       if(/^(skip|next)$/.test(low)){say(await ask());return}
       const r=await tool('check_answer',{card_id:awaiting,user_answer:t}); lastCard=awaiting; awaiting=null;
       const nxt=await ask(); say(r.speech+'. Next question. '+nxt); await refresh(); return}
-    if(/(how am i|progress|summary|doing)/.test(low)){const s=await tool('study_summary');const w=await tool('weak_topics');say(s.speech+' '+w.speech);return}
-    if(/weak/.test(low)){say((await tool('weak_topics')).speech);return}
-    if(/help|what can you do/.test(low)){say('You can say: quiz me, quiz me on DBMS, how am I doing, or weak topics. During a quiz say hint, skip, or stop. After an answer, say explain.');return}
     const m=low.match(/(quiz|test|ask)\s+me(?:\s+(?:on|about)\s+(.+))?/);
     if(m||/^(start|begin|next)/.test(low)){topic=(m&&m[2])?m[2].trim():"";say(await ask());return}
     say("Sorry, I didn't catch that. Try: quiz me, or how am I doing.");
