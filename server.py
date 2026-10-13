@@ -64,7 +64,7 @@ def _gemini_text(prompt: str) -> str:
         raise RuntimeError("GEMINI_API_KEY is not set")
     client = genai.Client(api_key=key)
     resp = client.models.generate_content(
-        model=os.getenv("GEMINI_MODEL", "gemini-2.5-flash"),
+        model=os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite"),
         contents=prompt,
     )
     return resp.text
@@ -145,14 +145,16 @@ def check_answer(card_id: int, user_answer: str) -> dict:
     for card in data["cards"]:
         if card["id"] != card_id:
             continue
-        feedback, graded_by = "", "keywords"
+        feedback, graded_by, gemini_error = "", "keywords", None
         try:
             if not os.getenv("GEMINI_API_KEY"):
                 raise RuntimeError("no key")
             ok, feedback = _grade_with_gemini(card["question"], card["answer"], user_answer)
             graded_by = "gemini"
-        except Exception:
+        except Exception as exc:
             ok = _grade_with_keywords(card["answer"], user_answer)
+            if os.getenv("GEMINI_API_KEY"):
+                gemini_error = str(exc)[:200]
         card["correct" if ok else "wrong"] += 1
         card["box"] = min(card["box"] + 1, 5) if ok else 1
         card["due"] = (now() + INTERVALS[card["box"]]).isoformat()
@@ -160,7 +162,8 @@ def check_answer(card_id: int, user_answer: str) -> dict:
         speech = ("Correct! " if ok else "Not quite. ")
         speech += (feedback + " " if feedback else "") + f"The answer is: {card['answer']}"
         return {"correct": ok, "expected_answer": card["answer"], "new_box": card["box"],
-                "graded_by": graded_by, "speech": speech}
+                "graded_by": graded_by, "gemini_error": gemini_error,
+                "speech": speech}
     return {"error": f"Card {card_id} not found.", "speech": "I could not find that card."}
 
 
