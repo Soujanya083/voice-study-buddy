@@ -25,7 +25,12 @@ Every response has a `speech` field written to be read aloud.
 pip install -r requirements.txt
 python server.py          # http://localhost:8000/mcp
 ```
-Test with: `npx @modelcontextprotocol/inspector` (Streamable HTTP, URL above).
+Then open **http://localhost:8000** in Chrome for the simulated Alexa+ page
+(`alexa_sim.html`). It talks to the MCP server at `/mcp`, uses the browser's
+speech recognition for input and speech synthesis to read replies aloud, and
+shows a live log of every MCP tool call.
+
+You can also run `python test_client.py` to call every tool from a script.
 
 ### Gemini (optional, needed for `generate_flashcards`)
 Get a free API key from Google AI Studio, then:

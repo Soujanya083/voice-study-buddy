@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Study Buddy - Simulated Alexa+</title>
+<style>
+:root{--bg:#0b1220;--card:#121c31;--line:#22314f;--text:#e8eefc;--mute:#8fa3c7;--accent:#2dd4ff;--me:#1d4ed8;--ok:#34d399;--bad:#f87171}
+@media (prefers-color-scheme: light){:root{--bg:#f3f6fc;--card:#fff;--line:#d9e2f2;--text:#0f1b33;--mute:#51648a;--accent:#0891b2;--me:#2563eb}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:16px/1.45 system-ui,Segoe UI,Roboto,sans-serif}
+header{padding:16px 20px;border-bottom:1px solid var(--line);display:flex;gap:12px;align-items:center}
+header h1{font-size:18px;margin:0}header small{color:var(--mute)}
+.ring{width:14px;height:14px;border-radius:50%;background:var(--accent);box-shadow:0 0 12px var(--accent)}
+.ring.live{animation:p 1s infinite}@keyframes p{50%{transform:scale(1.5);opacity:.5}}
+main{display:grid;grid-template-columns:1.6fr 1fr;gap:16px;padding:16px;max-width:1100px;margin:auto}
+@media(max-width:820px){main{grid-template-columns:1fr}}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px}
+.card h2{font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:var(--mute);margin:0 0 10px}
+#chat{height:380px;overflow:auto;display:flex;flex-direction:column;gap:8px;padding-right:4px}
+.b{max-width:85%;padding:9px 12px;border-radius:14px;white-space:pre-wrap}
+.b.a{background:var(--line);align-self:flex-start}.b.u{background:var(--me);color:#fff;align-self:flex-end}
+.row{display:flex;gap:8px;margin-top:10px}
+input,textarea{flex:1;background:transparent;color:var(--text);border:1px solid var(--line);border-radius:10px;padding:10px;font:inherit}
+button{background:var(--accent);color:#04202a;border:0;border-radius:10px;padding:10px 14px;font:inherit;font-weight:600;cursor:pointer}
+button.alt{background:transparent;color:var(--text);border:1px solid var(--line);font-weight:500}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+.stat{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px dashed var(--line)}
+.bar{height:8px;border-radius:6px;background:var(--line);overflow:hidden;margin:4px 0 10px}.bar i{display:block;height:100%;background:var(--ok)}
+#log{font:12px ui-monospace,Consolas,monospace;color:var(--mute);max-height:150px;overflow:auto}
+#log b{color:var(--accent)}details{margin-top:12px}summary{cursor:pointer;color:var(--mute)}
+.stack{display:flex;flex-direction:column;gap:8px;margin-top:8px}
+</style>
+</head>
+<body>
+<header><div class="ring" id="ring"></div><div><h1>Study Buddy <small>simulated Alexa+ experience</small></h1><small>Talks to the MCP server at <code>/mcp</code> over Streamable HTTP</small></div></header>
+<main>
+<section class="card">
+  <h2>Conversation</h2>
+  <div id="chat"></div>
+  <div class="row">
+    <button id="mic" title="Speak (Chrome)">🎤 Speak</button>
+    <input id="msg" placeholder='Try: "quiz me on dbms", "how am I doing", "stop"' autocomplete="off">
+    <button id="send">Send</button>
+  </div>
+  <div class="chips">
+    <button class="alt" data-s="quiz me">Quiz me</button>
+    <button class="alt" data-s="how am I doing">How am I doing?</button>
+    <button class="alt" data-s="weak topics">Weak topics</button>
+    <button class="alt" data-s="help">Help</button>
+    <button class="alt" id="muteBtn">🔊 Voice on</button>
+  </div>
+</section>
+<aside style="display:flex;flex-direction:column;gap:16px">
+  <section class="card"><h2>Progress</h2><div id="stats">Loading…</div><div id="topics"></div></section>
+  <section class="card"><h2>Add study material</h2>
+    <details open><summary>Add one flashcard</summary><div class="stack">
+      <input id="ct" placeholder="Topic (e.g. DBMS)"><input id="cq" placeholder="Question"><input id="ca" placeholder="Answer"><button id="addCard">Add flashcard</button></div></details>
+    <details><summary>Generate from notes (Gemini)</summary><div class="stack">
+      <input id="nt" placeholder="Topic"><textarea id="nn" rows="4" placeholder="Paste your notes…"></textarea><button id="gen">Generate flashcards</button></div></details>
+  </section>
+  <section class="card"><h2>MCP tool calls</h2><div id="log"></div></section>
+</aside>
+</main>
+<script>
+const $=id=>document.getElementById(id);
+let rid=1, awaiting=null, voiceOn=true, topic="";
+
+async function rpc(method, params){
+  const r=await fetch('/mcp',{method:'POST',headers:{'Content-Type':'application/json','Accept':'application/json, text/event-stream'},body:JSON.stringify({jsonrpc:'2.0',id:rid++,method,params})});
+  const j=await r.json(); if(j.error) throw new Error(j.error.message); return j.result;
+}
+async function tool(name,args={}){
+  const l=document.createElement('div'); l.innerHTML='<b>'+name+'</b>('+JSON.stringify(args).slice(0,80)+')'; $('log').prepend(l);
+  const res=await rpc('tools/call',{name,arguments:args});
+  const t=res.content&&res.content[0]?res.content[0].text:'{}';
+  try{return JSON.parse(t)}catch(e){return {speech:t}}
+}
+function say(text,who='a'){
+  const b=document.createElement('div'); b.className='b '+who; b.textContent=text; $('chat').append(b); $('chat').scrollTop=1e9;
+  if(who==='a'&&voiceOn&&'speechSynthesis' in window){speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(text);u.lang='en-IN';
+    $('ring').classList.add('live');u.onend=()=>$('ring').classList.remove('live');speechSynthesis.speak(u);}
+}
+async function refresh(){
+  try{
+    const s=await tool('study_summary'), w=await tool('weak_topics');
+    $('stats').innerHTML=['Total cards|'+s.total_cards,'Due now|'+s.due_now,'Mastered|'+s.mastered,'Accuracy|'+(s.accuracy_pct==null?'-':s.accuracy_pct+'%')]
+      .map(x=>{const[a,b]=x.split('|');return '<div class="stat"><span>'+a+'</span><b>'+b+'</b></div>'}).join('');
+    $('topics').innerHTML=(w.topics||[]).map(t=>'<div style="margin-top:8px">'+t.topic+' <small style="color:var(--mute)">'+(t.accuracy_pct==null?'not attempted':t.accuracy_pct+'%')+'</small><div class="bar"><i style="width:'+(t.accuracy_pct||0)+'%"></i></div></div>').join('');
+  }catch(e){$('stats').textContent='Server not reachable. Is python server.py running?'}
+}
+async function ask(){
+  const q=await tool('get_question',{topic});
+  awaiting=q.card_id||null; return q.speech;
+}
+async function handle(text){
+  const t=text.trim(); if(!t) return; say(t,'u'); const low=t.toLowerCase();
+  try{
+    if(/^(stop|quit|exit|cancel|that's all|enough)/.test(low)){awaiting=null;say('Okay, stopping the quiz. Great work!');return}
+    if(awaiting){
+      if(/^(skip|next)$/.test(low)){say(await ask());return}
+      const r=await tool('check_answer',{card_id:awaiting,user_answer:t}); awaiting=null;
+      const nxt=await ask(); say(r.speech+'. Next question. '+nxt); await refresh(); return}
+    if(/(how am i|progress|summary|doing)/.test(low)){const s=await tool('study_summary');const w=await tool('weak_topics');say(s.speech+' '+w.speech);return}
+    if(/weak/.test(low)){say((await tool('weak_topics')).speech);return}
+    if(/help|what can you do/.test(low)){say('You can say: quiz me, quiz me on DBMS, how am I doing, or weak topics. During a quiz say skip or stop.');return}
+    const m=low.match(/(quiz|test|ask)\s+me(?:\s+(?:on|about)\s+(.+))?/);
+    if(m||/^(start|begin|next)/.test(low)){topic=(m&&m[2])?m[2].trim():"";say(await ask());return}
+    say("Sorry, I didn't catch that. Try: quiz me, or how am I doing.");
+  }catch(e){say('Something went wrong: '+e.message)}
+}
+$('send').onclick=()=>{handle($('msg').value);$('msg').value=''};
+$('msg').addEventListener('keydown',e=>{if(e.key==='Enter'){$('send').click()}});
+document.querySelectorAll('[data-s]').forEach(b=>b.onclick=()=>handle(b.dataset.s));
+$('muteBtn').onclick=()=>{voiceOn=!voiceOn;$('muteBtn').textContent=voiceOn?'🔊 Voice on':'🔇 Voice off';if(!voiceOn)speechSynthesis.cancel()};
+$('addCard').onclick=async()=>{const r=await tool('add_flashcard',{topic:$('ct').value||'general',question:$('cq').value,answer:$('ca').value});say(r.speech);$('cq').value=$('ca').value='';refresh()};
+$('gen').onclick=async()=>{say('Generating flashcards…');const r=await tool('generate_flashcards',{topic:$('nt').value||'general',notes:$('nn').value,count:5});say(r.speech);refresh()};
+const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+if(SR){const rec=new SR();rec.lang='en-IN';rec.onresult=e=>handle(e.results[0][0].transcript);rec.onend=()=>$('mic').textContent='🎤 Speak';
+  $('mic').onclick=()=>{speechSynthesis.cancel();$('mic').textContent='Listening…';rec.start()}}
+else{$('mic').disabled=true;$('mic').title='Use Chrome for voice input'}
+say("Hi! I'm Study Buddy. Add some flashcards on the right, then say: quiz me.");refresh();
+</script>
+</body>
+</html>

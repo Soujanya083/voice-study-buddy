@@ -17,9 +17,13 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
+from starlette.requests import Request
+from starlette.responses import HTMLResponse
 
 DATA_FILE = Path(os.getenv("STUDY_DATA_FILE", "data.json"))
-mcp = FastMCP("Study Buddy", host="0.0.0.0", port=int(os.getenv("PORT", "8000")))
+mcp = FastMCP("Study Buddy", host=os.getenv("HOST", "127.0.0.1"),
+              port=int(os.getenv("PORT", "8000")),
+              json_response=True, stateless_http=True)
 
 # Leitner boxes: a correct answer moves a card up and delays its next review.
 INTERVALS = {1: timedelta(0), 2: timedelta(days=1), 3: timedelta(days=3),
@@ -164,5 +168,12 @@ def study_summary() -> dict:
             "speech": f"You have {len(cards)} cards, {due} due now, and {mastered} mastered."}
 
 
+@mcp.custom_route("/", methods=["GET"])
+async def home(request: Request) -> HTMLResponse:
+    """Serve the simulated Alexa+ page from the same origin as /mcp."""
+    page = Path(__file__).with_name("alexa_sim.html")
+    return HTMLResponse(page.read_text(encoding="utf-8"))
+
+
 if __name__ == "__main__":
-    mcp.run(transport="streamable-http")  # serves at http://localhost:8000/mcp
+    mcp.run(transport="streamable-http")  # MCP: http://localhost:8000/mcp  |  Alexa+ simulator: http://localhost:8000
