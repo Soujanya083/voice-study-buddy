@@ -22,6 +22,13 @@ from mcp.server.fastmcp import FastMCP
 from starlette.requests import Request
 from starlette.responses import HTMLResponse
 
+try:  # optional: read GEMINI_API_KEY from a local .env file
+    from dotenv import load_dotenv
+
+    load_dotenv(Path(__file__).with_name(".env"))
+except ImportError:
+    pass
+
 DATA_FILE = Path(os.getenv("STUDY_DATA_FILE", "data.json"))
 mcp = FastMCP("Study Buddy", host=os.getenv("HOST", "127.0.0.1"),
               port=int(os.getenv("PORT", "8000")),
@@ -71,14 +78,16 @@ def _gemini_text(prompt: str) -> str:
 
 
 @mcp.tool()
-def generate_flashcards(topic: str, notes: str, count: int = 5) -> dict:
-    """Create flashcards from pasted study notes using the Gemini API."""
+def generate_flashcards(topic: str, notes: str = "", count: int = 5) -> dict:
+    """Create flashcards with the Gemini API, from pasted notes or from the topic alone."""
     count = max(1, min(count, 10))
-    prompt = (
-        f"From the notes below, write {count} short flashcards. Answers must be "
-        "one short sentence, easy to say aloud. Reply with ONLY a JSON array of "
-        'objects like [{"question": "...", "answer": "..."}].\n\nNOTES:\n' + notes[:6000]
-    )
+    rules = ("Answers must be one short sentence, easy to say aloud. Reply with ONLY a JSON "
+             'array of objects like [{"question": "...", "answer": "..."}].')
+    if notes.strip():
+        prompt = f"From the notes below, write {count} short flashcards. {rules}\n\nNOTES:\n" + notes[:6000]
+    else:
+        prompt = (f"Write {count} short flashcards about '{topic}' for a college computer "
+                  f"science student. Cover the most important basics. {rules}")
     try:
         raw = _gemini_text(prompt)
         cards = json.loads(raw[raw.index("["): raw.rindex("]") + 1])

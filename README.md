@@ -36,13 +36,13 @@ shows a live log of every MCP tool call.
 
 You can also run `python test_client.py` to call every tool from a script.
 
-### Gemini (optional, needed for `generate_flashcards`)
-Get a free API key from Google AI Studio, then:
-```
-export GEMINI_API_KEY=your_key_here     # never commit this key
-export GEMINI_MODEL=gemini-2.5-flash    # optional, pick any current model
-```
-Without a key, everything else still works; add cards with `add_flashcard`.
+### Gemini (optional, needed for AI grading and `generate_flashcards`)
+1. Get a free API key from Google AI Studio.
+2. Copy `.env.example` to `.env` and paste your key after `GEMINI_API_KEY=`.
+   The server reads it automatically. `.env` is git-ignored, so never commit it.
+
+Optional: `GEMINI_MODEL` (default `gemini-3.1-flash-lite`). Check your key with
+`python check_gemini.py`. Without a key, everything else still works.
 
 ## Built during the hackathon
 All of this code was written during the hackathon window. (Edit this line if

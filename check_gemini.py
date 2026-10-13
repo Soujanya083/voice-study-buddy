@@ -2,6 +2,15 @@
 import os
 import sys
 
+from pathlib import Path
+
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv(Path(__file__).with_name(".env"))
+except ImportError:
+    pass
+
 key = os.getenv("GEMINI_API_KEY")
 if not key:
     sys.exit("GEMINI_API_KEY is not set in this terminal.\n"
