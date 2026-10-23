@@ -127,3 +127,29 @@ def test_extract_route_returns_text_and_rejects_bad_input():
     assert ok.status_code == 200 and "Indexes" in ok.json()["text"]
     assert client.post("/api/extract", content=b"").status_code == 400
     assert client.post("/api/extract", content=b"not a pdf").status_code == 400
+
+
+def test_retries_when_gemini_is_busy(monkeypatch):
+    monkeypatch.setattr(server.time, "sleep", lambda s: None)
+    calls = []
+
+    def flaky():
+        calls.append(1)
+        if len(calls) < 3:
+            raise RuntimeError("503 UNAVAILABLE high demand")
+        return "ok"
+
+    assert server._with_retries(flaky) == "ok" and len(calls) == 3
+
+
+def test_no_retry_for_other_errors(monkeypatch):
+    monkeypatch.setattr(server.time, "sleep", lambda s: None)
+    calls = []
+
+    def bad():
+        calls.append(1)
+        raise RuntimeError("400 invalid API key")
+
+    with pytest.raises(RuntimeError):
+        server._with_retries(bad)
+    assert len(calls) == 1

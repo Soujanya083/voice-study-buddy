@@ -135,7 +135,7 @@ $('msg').addEventListener('keydown',e=>{if(e.key==='Enter'){$('send').click()}})
 document.querySelectorAll('[data-s]').forEach(b=>b.onclick=()=>handle(b.dataset.s));
 $('muteBtn').onclick=()=>{voiceOn=!voiceOn;$('muteBtn').textContent=voiceOn?'🔊 Voice on':'🔇 Voice off';if(!voiceOn)speechSynthesis.cancel()};
 $('addCard').onclick=async()=>{const r=await tool('add_flashcard',{topic:$('ct').value||'general',question:$('cq').value,answer:$('ca').value});say(r.speech);$('cq').value=$('ca').value='';refresh()};
-$('gen').onclick=async()=>{if(!$('nt').value.trim()&&!$('nn').value.trim()){say('Type a topic, or paste some notes first.');return}say('Generating flashcards…');const r=await tool('generate_flashcards',{topic:$('nt').value||'general',notes:$('nn').value,count:5});say(r.speech);refresh()};
+$('gen').onclick=async()=>{if(!$('nt').value.trim()&&!$('nn').value.trim()){say('Type a topic, or paste some notes first.');return}say('Generating flashcards…');const r=await tool('generate_flashcards',{topic:$('nt').value||'general',notes:$('nn').value,count:5});say(r.error?r.speech+' ('+r.error+')':r.speech);refresh()};
 $('file').onchange=async e=>{const f=e.target.files[0];if(!f)return;
   const title=f.name.replace(/\.[^.]+$/,''); if(!$('nt').value)$('nt').value=title;
   if(f.name.toLowerCase().endsWith('.pdf')){

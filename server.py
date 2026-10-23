@@ -16,6 +16,7 @@ Every response includes a short 'speech' field written to be read aloud.
 import json
 import os
 import random
+import time
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
@@ -82,6 +83,18 @@ def _new_card(data: dict, topic: str, question: str, answer: str) -> dict:
     return card
 
 
+def _with_retries(fn, tries: int = 3):
+    """Retry briefly when Gemini is busy (503 / UNAVAILABLE / 429)."""
+    for attempt in range(tries):
+        try:
+            return fn()
+        except Exception as exc:
+            busy = any(x in str(exc) for x in ("503", "UNAVAILABLE", "429", "RESOURCE_EXHAUSTED"))
+            if not busy or attempt == tries - 1:
+                raise
+            time.sleep(1.5 * (attempt + 1))
+
+
 def _gemini_text(prompt: str) -> str:
     """Call the Gemini API. Needs GEMINI_API_KEY (free key from Google AI Studio)."""
     from google import genai
@@ -90,10 +103,8 @@ def _gemini_text(prompt: str) -> str:
     if not key:
         raise RuntimeError("GEMINI_API_KEY is not set")
     client = genai.Client(api_key=key)
-    resp = client.models.generate_content(
-        model=os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite"),
-        contents=prompt,
-    )
+    resp = _with_retries(lambda: client.models.generate_content(
+        model=os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite"), contents=prompt))
     return resp.text
 
 
