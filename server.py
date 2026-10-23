@@ -9,6 +9,7 @@ Tools:
   explain_answer      - short spoken explanation of a card's answer
   weak_topics         - analytics: accuracy per topic, weakest first
   list_topics         - topics you have, with card and due counts
+  plan_revision       - exam planner: daily review target and focus topics
   study_summary       - progress, streak, and 7-day activity
 
 Every response includes a short 'speech' field written to be read aloud.
@@ -277,6 +278,83 @@ def list_topics() -> dict:
     return {"topics": rows, "speech": speech}
 
 
+def _parse_date(text: str) -> date:
+    for fmt in ("%Y-%m-%d", "%d-%m-%Y", "%d/%m/%Y"):
+        try:
+            return datetime.strptime(text.strip(), fmt).date()
+        except ValueError:
+            pass
+    raise ValueError("Use a date like 2026-10-30 or 30-10-2026.")
+
+
+@mcp.tool()
+def plan_revision(exam_date: str = "", days_left: int = 0, topic: str = "") -> dict:
+    """Exam planner. Give an exam date (2026-10-30 or 30-10-2026) or days_left.
+
+    Uses your saved cards, accuracy, and today's activity to suggest a daily review
+    target and which topics to focus on. The exam date is remembered.
+    """
+    data = load()
+    if days_left > 0:
+        exam = date.today() + timedelta(days=days_left)
+    elif exam_date:
+        try:
+            exam = _parse_date(exam_date)
+        except ValueError as exc:
+            return {"error": str(exc), "speech": "I could not read that date. Try 30-10-2026."}
+    elif data.get("exam_date"):
+        exam = date.fromisoformat(data["exam_date"])
+    else:
+        return {"error": "No exam date set.",
+                "speech": "When is your exam? Say: my exam is in 5 days."}
+    left = (exam - date.today()).days
+    if left < 0:
+        return {"error": "That date has already passed.",
+                "speech": "That exam date has already passed. Tell me a new one."}
+    cards = [c for c in data["cards"] if not topic or c["topic"] == topic.lower()]
+    if not cards:
+        return {"error": "No flashcards yet.",
+                "speech": "You have no flashcards yet. Add some, then ask for a plan."}
+    data["exam_date"] = exam.isoformat()
+    save(data)
+
+    to_learn = [c for c in cards if c["box"] < 4]
+    study_days = max(left, 1)
+    total_reviews = 2 * len(to_learn) + (len(cards) - len(to_learn))
+    per_day = max(1, -(-total_reviews // study_days))  # ceiling division
+
+    stats: dict = {}
+    for c in cards:
+        t = stats.setdefault(c["topic"], {"correct": 0, "wrong": 0, "needs_work": 0})
+        t["correct"] += c["correct"]
+        t["wrong"] += c["wrong"]
+        t["needs_work"] += int(c["box"] < 4)
+    focus = []
+    for name, t in stats.items():
+        tried = t["correct"] + t["wrong"]
+        focus.append({"topic": name, "needs_work": t["needs_work"],
+                      "accuracy_pct": round(100 * t["correct"] / tried) if tried else None})
+    focus.sort(key=lambda f: (f["accuracy_pct"] is None, f["accuracy_pct"] or 0, -f["needs_work"]))
+    focus = focus[:3]
+
+    schedule = []
+    for i in range(min(study_days, 14)):
+        day = date.today() + timedelta(days=i)
+        schedule.append({"date": day.isoformat(), "label": day.strftime("%a %d %b"),
+                         "reviews": per_day, "focus": focus[i % len(focus)]["topic"]})
+    done_today = data.get("activity", {}).get(date.today().isoformat(), {}).get("answered", 0)
+
+    when = "today" if left == 0 else f"in {left} day{'s' if left != 1 else ''}"
+    speech = (f"Your exam is {when}. {len(to_learn)} of your {len(cards)} cards still need work. "
+              f"Aim for about {per_day} reviews a day, starting with {focus[0]['topic']}.")
+    if done_today:
+        speech += f" You have already done {done_today} today."
+    return {"exam_date": exam.isoformat(), "days_left": left, "total_cards": len(cards),
+            "needs_work": len(to_learn), "reviews_per_day": per_day,
+            "done_today": done_today, "focus_topics": focus, "schedule": schedule,
+            "speech": speech}
+
+
 @mcp.tool()
 def study_summary() -> dict:
     """Overall progress: totals, accuracy, streak, and the last 7 days."""
@@ -292,11 +370,14 @@ def study_summary() -> dict:
         d = (date.today() - timedelta(days=i)).isoformat()
         a = activity.get(d, {"answered": 0, "correct": 0})
         last7.append({"date": d, "answered": a["answered"], "correct": a["correct"]})
+    exam_in = ((date.fromisoformat(data["exam_date"]) - date.today()).days
+               if data.get("exam_date") else None)
     speech = f"You have {len(cards)} cards, {due} due now, and {mastered} mastered."
     if streak:
         speech += f" You are on a {streak} day streak."
     return {"total_cards": len(cards), "due_now": due, "mastered": mastered,
-            "accuracy_pct": acc, "streak": streak, "last7": last7, "speech": speech}
+            "accuracy_pct": acc, "streak": streak, "last7": last7,
+            "exam_in_days": exam_in, "speech": speech}
 
 
 MAX_PDF_BYTES = 10 * 1024 * 1024  # 10 MB

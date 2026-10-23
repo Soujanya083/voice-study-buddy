@@ -20,7 +20,8 @@ Replies are read aloud, so keep your own wording short and natural. Prefer the
    - If the user asks for help, call `get_hint(card_id)` (never reveal the answer).
    - After an answer, if the user asks "why", call `explain_answer(card_id)`.
    - Stop when the user says stop, skip, or nothing is due.
-3. **Review.** Call `study_summary` and `weak_topics`, then suggest the weakest
+3. **Exam planning.** If the user mentions an exam, call `plan_revision` (with `days_left` or `exam_date`) and read out the daily target and focus topic.
+4. **Review.** Call `list_topics` to see what exists, then `study_summary` and `weak_topics`, then suggest the weakest
    topic to practise next.
 
 ## Rules

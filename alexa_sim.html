@@ -48,6 +48,7 @@ button.alt{background:transparent;color:var(--text);border:1px solid var(--line)
     <button class="alt" data-s="quiz me">Quiz me</button>
     <button class="alt" data-s="how am I doing">How am I doing?</button>
     <button class="alt" data-s="weak topics">Weak topics</button>
+    <button class="alt" data-s="plan my revision">📅 Plan</button>
     <button class="alt" data-s="hint">Hint</button>
     <button class="alt" data-s="explain">Explain</button>
     <button class="alt" data-s="help">Help</button>
@@ -55,7 +56,10 @@ button.alt{background:transparent;color:var(--text);border:1px solid var(--line)
   </div>
 </section>
 <aside style="display:flex;flex-direction:column;gap:16px">
-  <section class="card"><h2>Progress</h2><div id="streak" style="font-weight:600"></div><div id="chart"></div><div id="stats">Loading…</div><div id="topics"></div></section>
+  <section class="card"><h2>Progress</h2><div id="streak" style="font-weight:600"></div><div id="exam" style="font-weight:600;margin-top:4px"></div><div id="chart"></div><div id="stats">Loading…</div><div id="topics"></div></section>
+  <section class="card"><h2>Exam planner</h2>
+    <div class="stack" style="margin-top:0"><label style="color:var(--mute);font-size:13px">Exam date</label>
+      <input type="date" id="examDate"><button id="planBtn">Plan my revision</button></div></section>
   <section class="card"><h2>Add study material</h2>
     <details open><summary>Add one flashcard</summary><div class="stack">
       <input id="ct" placeholder="Topic (e.g. DBMS)"><input id="cq" placeholder="Question"><input id="ca" placeholder="Answer"><button id="addCard">Add flashcard</button></div></details>
@@ -86,9 +90,9 @@ async function tool(name,args={}){
   l.append(note);
   return out;
 }
-function say(text,who='a'){
+function say(text,who='a',speak=true){
   const b=document.createElement('div'); b.className='b '+who; b.textContent=text; $('chat').append(b); $('chat').scrollTop=1e9;
-  if(who==='a'&&voiceOn&&'speechSynthesis' in window){speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(text);u.lang='en-IN';
+  if(who==='a'&&speak&&voiceOn&&'speechSynthesis' in window){speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(text);u.lang='en-IN';
     $('ring').classList.add('live');u.onend=()=>$('ring').classList.remove('live');speechSynthesis.speak(u);}
 }
 async function refresh(){
@@ -96,6 +100,7 @@ async function refresh(){
     const s=await tool('study_summary'), w=await tool('weak_topics'), tp=await tool('list_topics');
     $('stats').innerHTML=['Total cards|'+s.total_cards,'Due now|'+s.due_now,'Mastered|'+s.mastered,'Accuracy|'+(s.accuracy_pct==null?'-':s.accuracy_pct+'%')]
       .map(x=>{const[a,b]=x.split('|');return '<div class="stat"><span>'+a+'</span><b>'+b+'</b></div>'}).join('');
+    $('exam').textContent=(s.exam_in_days!=null&&s.exam_in_days>=0)?'📅 Exam in '+s.exam_in_days+' day'+(s.exam_in_days==1?'':'s'):'';
     $('streak').textContent=s.streak>0?'🔥 '+s.streak+'-day streak':'Answer a question today to start a streak';
     const mx=Math.max(1,...s.last7.map(d=>d.answered));
     $('chart').innerHTML='<div style="display:flex;gap:6px;align-items:flex-end;height:70px;margin:10px 0 2px">'+s.last7.map(d=>'<div title="'+d.date+': '+d.correct+'/'+d.answered+' correct" style="flex:1;border-radius:4px;background:var(--accent);opacity:'+(d.answered?1:.25)+';height:'+Math.max(4,Math.round(64*d.answered/mx))+'px"></div>').join('')+'</div><small style="color:var(--mute)">Questions answered, last 7 days</small>';
@@ -103,6 +108,11 @@ async function refresh(){
     (tp.topics||[]).forEach(t=>{const b=document.createElement('button');b.className='alt';b.textContent='📚 '+t.topic+' ('+t.due+' due)';b.onclick=()=>handle('quiz me on '+t.topic);$('topicChips').append(b)});
     $('topics').innerHTML=(w.topics||[]).map(t=>'<div style="margin-top:8px">'+t.topic+' <small style="color:var(--mute)">'+(t.accuracy_pct==null?'not attempted':t.accuracy_pct+'%')+'</small><div class="bar"><i style="width:'+(t.accuracy_pct||0)+'%"></i></div></div>').join('');
   }catch(e){$('stats').textContent='Server not reachable. Is python server.py running?'}
+}
+async function plan(args){
+  const r=await tool('plan_revision',args); say(r.speech);
+  if(r.schedule&&r.schedule.length){say('Your plan:\n'+r.schedule.map(x=>x.label+': '+x.reviews+' reviews, focus on '+x.focus).join('\n'),'a',false)}
+  refresh();
 }
 async function ask(){
   const q=await tool('get_question',{topic});
@@ -113,9 +123,12 @@ async function handle(text){
   try{
     if(/^(stop|quit|exit|cancel|that's all|enough)/.test(low)){awaiting=null;say('Okay, stopping the quiz. Great work!');return}
     // Commands that always work, even while a question is waiting for an answer.
+    const em=low.match(/exam.*\bin (\d+) days?/);
+    if(em){await plan({days_left:parseInt(em[1])});return}
+    if(/^(plan|study plan|plan my revision|revision plan)/.test(low)){await plan({});return}
     if(/^(how am i|my progress|progress|summary|study summary)/.test(low)){const s=await tool('study_summary');const w=await tool('weak_topics');say(s.speech+' '+w.speech);return}
     if(/^(weak topics|weak)/.test(low)){say((await tool('weak_topics')).speech);return}
-    if(/^(help|what can you do)/.test(low)){say('You can say: quiz me, quiz me on DBMS, how am I doing, or weak topics. During a quiz say hint, skip, or stop. After an answer, say explain.');return}
+    if(/^(help|what can you do)/.test(low)){say('You can say: quiz me, quiz me on DBMS, how am I doing, weak topics, or my exam is in 5 days. During a quiz say hint, skip, or stop. After an answer, say explain.');return}
     if(/^(quiz|test|ask)\s+me/.test(low)){const m=low.match(/(?:on|about)\s+(.+)/);topic=m?m[1].trim():"";say(await ask());return}
     if(/^hint/.test(low)){
       if(awaiting){say((await tool('get_hint',{card_id:awaiting})).speech)}else{say('Ask me a question first, then say hint.')}return}
@@ -130,6 +143,7 @@ async function handle(text){
     say("Sorry, I didn't catch that. Try: quiz me, or how am I doing.");
   }catch(e){say('Something went wrong: '+e.message)}
 }
+$('planBtn').onclick=()=>{const d=$('examDate').value;plan(d?{exam_date:d}:{})};
 $('send').onclick=()=>{handle($('msg').value);$('msg').value=''};
 $('msg').addEventListener('keydown',e=>{if(e.key==='Enter'){$('send').click()}});
 document.querySelectorAll('[data-s]').forEach(b=>b.onclick=()=>handle(b.dataset.s));

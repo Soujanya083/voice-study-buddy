@@ -153,3 +153,49 @@ def test_no_retry_for_other_errors(monkeypatch):
     with pytest.raises(RuntimeError):
         server._with_retries(bad)
     assert len(calls) == 1
+
+
+# ---- exam planner ----
+def add_many(topic, n):
+    for i in range(n):
+        server.add_flashcard(topic, f"Question {i}?", f"Answer number {i}")
+
+
+def test_plan_sets_daily_target_from_days_left():
+    add_many("mysql", 10)
+    p = server.plan_revision(days_left=5)
+    assert p["needs_work"] == 10 and p["reviews_per_day"] == 4  # 20 reviews over 5 days
+    assert len(p["schedule"]) == 5 and p["days_left"] == 5
+
+
+def test_plan_accepts_dates_and_remembers_them():
+    add_many("mysql", 4)
+    exam = date.today() + timedelta(days=3)
+    assert server.plan_revision(exam_date=exam.strftime("%d-%m-%Y"))["days_left"] == 3
+    assert server.plan_revision()["days_left"] == 3  # remembered
+    assert server.study_summary()["exam_in_days"] == 3
+
+
+def test_plan_needs_a_date_and_rejects_past_dates():
+    add_many("mysql", 2)
+    assert "error" in server.plan_revision()
+    past = (date.today() - timedelta(days=2)).isoformat()
+    assert "error" in server.plan_revision(exam_date=past)
+    assert "error" in server.plan_revision(exam_date="not a date")
+
+
+def test_plan_focuses_on_weakest_topic_first():
+    good, bad = add("good"), add("bad")
+    server.check_answer(good, "a unique identifier")
+    server.check_answer(bad, "banana")
+    assert server.plan_revision(days_left=4)["focus_topics"][0]["topic"] == "bad"
+
+
+def test_plan_for_exam_today_is_one_study_day():
+    add_many("mysql", 3)
+    p = server.plan_revision(exam_date=date.today().isoformat())
+    assert p["days_left"] == 0 and p["reviews_per_day"] == 6 and len(p["schedule"]) == 1
+
+
+def test_plan_without_cards_is_polite():
+    assert "error" in server.plan_revision(days_left=5)

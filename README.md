@@ -19,6 +19,7 @@ come back sooner. It also shows which topics are weak, and keeps a daily streak.
 - **Smart grading:** Gemini judges the *meaning* of your answer, so "a unique ID for every row" can still be correct. Without an API key it falls back to keyword matching.
 - **Spaced repetition:** a Leitner box system. Right answers move a card to a later box (reviewed after longer gaps); wrong answers send it back to box 1.
 - **Hints and explanations:** ask for a hint (never gives the answer away) or an explanation after answering.
+- **Exam planner:** tell it your exam date (or say *"my exam is in 5 days"*) and it works out how many reviews to do each day and which weak topics to start with, based on your saved cards and accuracy.
 - **Progress:** accuracy per topic, cards due, cards mastered, a streak, and a 7-day activity chart.
 - **Voice-ready replies:** every tool returns a short `speech` field written to be read aloud.
 
@@ -45,6 +46,7 @@ its result, including whether Gemini or the keyword matcher graded an answer.
 | `get_hint` | A hint that does not reveal the full answer |
 | `explain_answer` | Short spoken explanation of a card's answer |
 | `list_topics` | Topics with card and due counts |
+| `plan_revision` | Exam planner: daily review target, focus topics, day-by-day plan |
 | `weak_topics` | Accuracy per topic, weakest first |
 | `study_summary` | Totals, accuracy, streak, and the last 7 days |
 
@@ -95,7 +97,7 @@ pip install pytest
 pytest
 ```
 
-12 tests cover grading, hints, spaced repetition, streaks, topics, and flashcard generation
+The tests cover grading, hints, spaced repetition, streaks, topics, exam planning, PDF extraction, retries, and flashcard generation
 (Gemini is stubbed, so no key is needed). `python test_client.py` calls every tool against a
 running server over real MCP.
 
@@ -127,7 +129,7 @@ running server over real MCP.
 - Multiple users, each with their own cards and progress
 - PowerPoint uploads and scanned-PDF support (OCR)
 - Adaptive review timing based on each card's difficulty
-- Exam-date study plans
+- Daily reminders and calendar integration for the exam plan
 - Shared decks for classmates
 - Connecting to a real Alexa+ device when custom integrations are available
 
