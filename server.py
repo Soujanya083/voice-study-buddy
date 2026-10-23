@@ -8,19 +8,20 @@ Tools:
   get_hint            - a hint that never gives the full answer away
   explain_answer      - short spoken explanation of a card's answer
   weak_topics         - analytics: accuracy per topic, weakest first
-  study_summary       - progress snapshot with a spoken summary
+  list_topics         - topics you have, with card and due counts
+  study_summary       - progress, streak, and 7-day activity
 
 Every response includes a short 'speech' field written to be read aloud.
 """
 import json
 import os
 import random
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
 from starlette.requests import Request
-from starlette.responses import HTMLResponse
+from starlette.responses import HTMLResponse, JSONResponse
 
 try:  # optional: read GEMINI_API_KEY from a local .env file
     from dotenv import load_dotenv
@@ -51,6 +52,25 @@ def load() -> dict:
 
 def save(data: dict) -> None:
     DATA_FILE.write_text(json.dumps(data, indent=2))
+
+
+def _log_activity(data: dict, ok: bool) -> None:
+    """Count this answer toward today's activity (local date)."""
+    day = data.setdefault("activity", {}).setdefault(
+        date.today().isoformat(), {"answered": 0, "correct": 0})
+    day["answered"] += 1
+    day["correct"] += int(ok)
+
+
+def _streak(activity: dict) -> int:
+    """Consecutive days with at least one answer. Still alive if today is empty."""
+    d, n = date.today(), 0
+    if activity.get(d.isoformat(), {}).get("answered", 0) == 0:
+        d -= timedelta(days=1)
+    while activity.get(d.isoformat(), {}).get("answered", 0) > 0:
+        n += 1
+        d -= timedelta(days=1)
+    return n
 
 
 def _new_card(data: dict, topic: str, question: str, answer: str) -> dict:
@@ -167,6 +187,7 @@ def check_answer(card_id: int, user_answer: str) -> dict:
         card["correct" if ok else "wrong"] += 1
         card["box"] = min(card["box"] + 1, 5) if ok else 1
         card["due"] = (now() + INTERVALS[card["box"]]).isoformat()
+        _log_activity(data, ok)
         save(data)
         speech = ("Correct! " if ok else "Not quite. ")
         speech += (feedback + " " if feedback else "") + f"The answer is: {card['answer']}"
@@ -232,16 +253,54 @@ def weak_topics() -> dict:
 
 
 @mcp.tool()
+def list_topics() -> dict:
+    """List topics with how many cards each has and how many are due."""
+    topics: dict = {}
+    for c in load()["cards"]:
+        t = topics.setdefault(c["topic"], {"topic": c["topic"], "cards": 0, "due": 0})
+        t["cards"] += 1
+        t["due"] += int(datetime.fromisoformat(c["due"]) <= now())
+    rows = sorted(topics.values(), key=lambda r: r["topic"])
+    speech = ("You have cards on " + ", ".join(r["topic"] for r in rows) + "."
+              if rows else "You have no topics yet.")
+    return {"topics": rows, "speech": speech}
+
+
+@mcp.tool()
 def study_summary() -> dict:
-    """Overall progress snapshot."""
-    cards = load()["cards"]
+    """Overall progress: totals, accuracy, streak, and the last 7 days."""
+    data = load()
+    cards, activity = data["cards"], data.get("activity", {})
     due = sum(1 for c in cards if datetime.fromisoformat(c["due"]) <= now())
     mastered = sum(1 for c in cards if c["box"] >= 4)
     right, wrong = sum(c["correct"] for c in cards), sum(c["wrong"] for c in cards)
     acc = round(100 * right / (right + wrong)) if right + wrong else None
+    streak = _streak(activity)
+    last7 = []
+    for i in range(6, -1, -1):
+        d = (date.today() - timedelta(days=i)).isoformat()
+        a = activity.get(d, {"answered": 0, "correct": 0})
+        last7.append({"date": d, "answered": a["answered"], "correct": a["correct"]})
+    speech = f"You have {len(cards)} cards, {due} due now, and {mastered} mastered."
+    if streak:
+        speech += f" You are on a {streak} day streak."
     return {"total_cards": len(cards), "due_now": due, "mastered": mastered,
-            "accuracy_pct": acc,
-            "speech": f"You have {len(cards)} cards, {due} due now, and {mastered} mastered."}
+            "accuracy_pct": acc, "streak": streak, "last7": last7, "speech": speech}
+
+
+MAX_PDF_BYTES = 10 * 1024 * 1024  # 10 MB
+MAX_PDF_PAGES = 30
+
+
+def _pdf_text(data: bytes) -> str:
+    """Extract text from the first pages of a PDF (text PDFs only, no OCR)."""
+    from io import BytesIO
+
+    from pypdf import PdfReader
+
+    reader = PdfReader(BytesIO(data))
+    parts = [(page.extract_text() or "") for page in reader.pages[:MAX_PDF_PAGES]]
+    return "\n".join(parts).strip()
 
 
 @mcp.custom_route("/", methods=["GET"])
@@ -249,6 +308,25 @@ async def home(request: Request) -> HTMLResponse:
     """Serve the simulated Alexa+ page from the same origin as /mcp."""
     page = Path(__file__).with_name("alexa_sim.html")
     return HTMLResponse(page.read_text(encoding="utf-8"))
+
+
+@mcp.custom_route("/api/extract", methods=["POST"])
+async def extract_pdf(request: Request) -> JSONResponse:
+    """Pull text out of an uploaded PDF so the page can turn it into flashcards."""
+    body = await request.body()
+    if not body:
+        return JSONResponse({"error": "No file received."}, status_code=400)
+    if len(body) > MAX_PDF_BYTES:
+        return JSONResponse({"error": "That PDF is larger than 10 MB."}, status_code=413)
+    try:
+        text = _pdf_text(body)
+    except Exception as exc:
+        return JSONResponse({"error": f"Could not read this PDF: {exc}"}, status_code=400)
+    if not text:
+        return JSONResponse(
+            {"error": "No text found. Scanned PDFs (images only) are not supported."},
+            status_code=422)
+    return JSONResponse({"text": text[:6000], "chars": len(text), "truncated": len(text) > 6000})
 
 
 if __name__ == "__main__":

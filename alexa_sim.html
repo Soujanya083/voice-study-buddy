@@ -43,6 +43,7 @@ button.alt{background:transparent;color:var(--text);border:1px solid var(--line)
     <input id="msg" placeholder='Try: "quiz me on dbms", "how am I doing", "stop"' autocomplete="off">
     <button id="send">Send</button>
   </div>
+  <div class="chips" id="topicChips"></div>
   <div class="chips">
     <button class="alt" data-s="quiz me">Quiz me</button>
     <button class="alt" data-s="how am I doing">How am I doing?</button>
@@ -54,12 +55,13 @@ button.alt{background:transparent;color:var(--text);border:1px solid var(--line)
   </div>
 </section>
 <aside style="display:flex;flex-direction:column;gap:16px">
-  <section class="card"><h2>Progress</h2><div id="stats">Loading…</div><div id="topics"></div></section>
+  <section class="card"><h2>Progress</h2><div id="streak" style="font-weight:600"></div><div id="chart"></div><div id="stats">Loading…</div><div id="topics"></div></section>
   <section class="card"><h2>Add study material</h2>
     <details open><summary>Add one flashcard</summary><div class="stack">
       <input id="ct" placeholder="Topic (e.g. DBMS)"><input id="cq" placeholder="Question"><input id="ca" placeholder="Answer"><button id="addCard">Add flashcard</button></div></details>
-    <details><summary>Generate from notes (Gemini)</summary><div class="stack">
-      <input id="nt" placeholder="Topic"><textarea id="nn" rows="4" placeholder="Paste your notes…"></textarea><button id="gen">Generate flashcards</button></div></details>
+    <details><summary>Generate with Gemini (notes optional)</summary><div class="stack">
+      <input type="file" id="file" accept=".txt,.md,.pdf,text/plain,application/pdf">
+      <input id="nt" placeholder="Topic"><textarea id="nn" rows="4" placeholder="Paste your notes (optional). Leave empty and Gemini uses just the topic."></textarea><button id="gen">Generate flashcards</button></div></details>
   </section>
   <section class="card"><h2>MCP tool calls</h2><div id="log"></div></section>
 </aside>
@@ -76,7 +78,13 @@ async function tool(name,args={}){
   const l=document.createElement('div'); l.innerHTML='<b>'+name+'</b>('+JSON.stringify(args).slice(0,80)+')'; $('log').prepend(l);
   const res=await rpc('tools/call',{name,arguments:args});
   const t=res.content&&res.content[0]?res.content[0].text:'{}';
-  try{return JSON.parse(t)}catch(e){return {speech:t}}
+  let out; try{out=JSON.parse(t)}catch(e){out={speech:t}}
+  const note=document.createElement('span');
+  if(out.graded_by){note.textContent=' → graded by '+out.graded_by+(out.gemini_error?' (Gemini error: '+out.gemini_error.slice(0,70)+')':'')}
+  else if(out.error){note.textContent=' → error: '+out.error}
+  else{note.textContent=' → ok'}
+  l.append(note);
+  return out;
 }
 function say(text,who='a'){
   const b=document.createElement('div'); b.className='b '+who; b.textContent=text; $('chat').append(b); $('chat').scrollTop=1e9;
@@ -85,9 +93,14 @@ function say(text,who='a'){
 }
 async function refresh(){
   try{
-    const s=await tool('study_summary'), w=await tool('weak_topics');
+    const s=await tool('study_summary'), w=await tool('weak_topics'), tp=await tool('list_topics');
     $('stats').innerHTML=['Total cards|'+s.total_cards,'Due now|'+s.due_now,'Mastered|'+s.mastered,'Accuracy|'+(s.accuracy_pct==null?'-':s.accuracy_pct+'%')]
       .map(x=>{const[a,b]=x.split('|');return '<div class="stat"><span>'+a+'</span><b>'+b+'</b></div>'}).join('');
+    $('streak').textContent=s.streak>0?'🔥 '+s.streak+'-day streak':'Answer a question today to start a streak';
+    const mx=Math.max(1,...s.last7.map(d=>d.answered));
+    $('chart').innerHTML='<div style="display:flex;gap:6px;align-items:flex-end;height:70px;margin:10px 0 2px">'+s.last7.map(d=>'<div title="'+d.date+': '+d.correct+'/'+d.answered+' correct" style="flex:1;border-radius:4px;background:var(--accent);opacity:'+(d.answered?1:.25)+';height:'+Math.max(4,Math.round(64*d.answered/mx))+'px"></div>').join('')+'</div><small style="color:var(--mute)">Questions answered, last 7 days</small>';
+    $('topicChips').innerHTML='';
+    (tp.topics||[]).forEach(t=>{const b=document.createElement('button');b.className='alt';b.textContent='📚 '+t.topic+' ('+t.due+' due)';b.onclick=()=>handle('quiz me on '+t.topic);$('topicChips').append(b)});
     $('topics').innerHTML=(w.topics||[]).map(t=>'<div style="margin-top:8px">'+t.topic+' <small style="color:var(--mute)">'+(t.accuracy_pct==null?'not attempted':t.accuracy_pct+'%')+'</small><div class="bar"><i style="width:'+(t.accuracy_pct||0)+'%"></i></div></div>').join('');
   }catch(e){$('stats').textContent='Server not reachable. Is python server.py running?'}
 }
@@ -122,7 +135,16 @@ $('msg').addEventListener('keydown',e=>{if(e.key==='Enter'){$('send').click()}})
 document.querySelectorAll('[data-s]').forEach(b=>b.onclick=()=>handle(b.dataset.s));
 $('muteBtn').onclick=()=>{voiceOn=!voiceOn;$('muteBtn').textContent=voiceOn?'🔊 Voice on':'🔇 Voice off';if(!voiceOn)speechSynthesis.cancel()};
 $('addCard').onclick=async()=>{const r=await tool('add_flashcard',{topic:$('ct').value||'general',question:$('cq').value,answer:$('ca').value});say(r.speech);$('cq').value=$('ca').value='';refresh()};
-$('gen').onclick=async()=>{say('Generating flashcards…');const r=await tool('generate_flashcards',{topic:$('nt').value||'general',notes:$('nn').value,count:5});say(r.speech);refresh()};
+$('gen').onclick=async()=>{if(!$('nt').value.trim()&&!$('nn').value.trim()){say('Type a topic, or paste some notes first.');return}say('Generating flashcards…');const r=await tool('generate_flashcards',{topic:$('nt').value||'general',notes:$('nn').value,count:5});say(r.speech);refresh()};
+$('file').onchange=async e=>{const f=e.target.files[0];if(!f)return;
+  const title=f.name.replace(/\.[^.]+$/,''); if(!$('nt').value)$('nt').value=title;
+  if(f.name.toLowerCase().endsWith('.pdf')){
+    say('Reading '+f.name+'…');
+    try{const r=await fetch('/api/extract',{method:'POST',body:f});const j=await r.json();
+      if(!r.ok){say(j.error||'Could not read that PDF.');return}
+      $('nn').value=j.text;say('Loaded '+j.chars+' characters from the PDF'+(j.truncated?' (using the first part)':'')+'. Now click Generate flashcards.')
+    }catch(err){say('Could not read that PDF: '+err.message)}
+  }else{const r=new FileReader();r.onload=()=>{$('nn').value=String(r.result).slice(0,6000)};r.readAsText(f)}};
 const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
 if(SR){const rec=new SR();rec.lang='en-IN';rec.onresult=e=>handle(e.results[0][0].transcript);rec.onend=()=>$('mic').textContent='🎤 Speak';
   $('mic').onclick=()=>{speechSynthesis.cancel();$('mic').textContent='Listening…';rec.start()}}
