@@ -199,3 +199,15 @@ def test_plan_for_exam_today_is_one_study_day():
 
 def test_plan_without_cards_is_polite():
     assert "error" in server.plan_revision(days_left=5)
+
+
+def test_far_exam_shows_only_a_week_and_counts_the_rest():
+    add_many("mysql", 4)
+    p = server.plan_revision(days_left=30)
+    assert len(p["schedule"]) == 7 and p["more_days"] == 23
+    assert p["schedule"][0]["label"] == "Today" and p["schedule"][1]["label"] == "Tomorrow"
+
+
+def test_plan_speech_uses_correct_singular():
+    add_many("mysql", 2)
+    assert "1 review a day" in server.plan_revision(days_left=30)["speech"]

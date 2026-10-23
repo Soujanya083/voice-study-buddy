@@ -338,20 +338,24 @@ def plan_revision(exam_date: str = "", days_left: int = 0, topic: str = "") -> d
     focus = focus[:3]
 
     schedule = []
-    for i in range(min(study_days, 14)):
+    for i in range(min(study_days, 7)):
         day = date.today() + timedelta(days=i)
-        schedule.append({"date": day.isoformat(), "label": day.strftime("%a %d %b"),
+        label = "Today" if i == 0 else "Tomorrow" if i == 1 else day.strftime("%a %d %b")
+        schedule.append({"date": day.isoformat(), "label": label,
                          "reviews": per_day, "focus": focus[i % len(focus)]["topic"]})
+    more_days = max(0, study_days - 7)
     done_today = data.get("activity", {}).get(date.today().isoformat(), {}).get("answered", 0)
 
     when = "today" if left == 0 else f"in {left} day{'s' if left != 1 else ''}"
     speech = (f"Your exam is {when}. {len(to_learn)} of your {len(cards)} cards still need work. "
-              f"Aim for about {per_day} reviews a day, starting with {focus[0]['topic']}.")
+              f"Aim for about {per_day} review{'s' if per_day != 1 else ''} a day, "
+              f"starting with {focus[0]['topic']}.")
     if done_today:
         speech += f" You have already done {done_today} today."
     return {"exam_date": exam.isoformat(), "days_left": left, "total_cards": len(cards),
             "needs_work": len(to_learn), "reviews_per_day": per_day,
             "done_today": done_today, "focus_topics": focus, "schedule": schedule,
+            "more_days": more_days,
             "speech": speech}
 
 
